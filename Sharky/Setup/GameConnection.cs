@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using SC2APIProtocol;
@@ -24,10 +25,19 @@ namespace Sharky
 
         public void StartSC2Instance(int port)
         {
-            var processStartInfo = new ProcessStartInfo(starcraftExe);
-            processStartInfo.Arguments = String.Format("-listen {0} -port {1} -displayMode 0", address, port);
-            processStartInfo.WorkingDirectory = Path.Combine(starcraftDir, "Support64");
-            Process.Start(processStartInfo);
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                Console.WriteLine(
+                    $"Please launch SC2 with these parameters: -listen {address} -port {port} -displayMode 0");
+                Console.ReadLine();
+            }
+            else
+            {
+                var processStartInfo = new ProcessStartInfo(starcraftExe);
+                processStartInfo.Arguments = $"-listen {address} -port {port} -displayMode 0";
+                processStartInfo.WorkingDirectory = Path.Combine(starcraftDir, "Support64");
+                Process.Start(processStartInfo);   
+            }
         }
 
         public async Task Connect(int port)
@@ -55,13 +65,14 @@ namespace Sharky
                 createGame.RandomSeed = (uint)randomSeed;
             }
 
-            string mapPath = Path.Combine(starcraftDir, "Maps", mapName);
+            string mapPath = Path.Combine(starcraftDir, "maps", mapName);
             if (!File.Exists(mapPath))
             {
                 throw new Exception("Could not find map at " + mapPath);
             }
             createGame.LocalMap = new LocalMap();
-            createGame.LocalMap.MapPath = mapPath;
+            // createGame.LocalMap.MapPath = mapPath; 
+            createGame.LocalMap.MapPath = @"C:\Program Files (x86)\StarCraft II\maps\" + mapName;
 
             var player1 = new PlayerSetup();
             createGame.PlayerSetup.Add(player1);
@@ -79,26 +90,44 @@ namespace Sharky
             var response = await Proxy.SendRequest(request);
         }
 
-        private void readSettings()
+        private void ReadSettings()
         {
-            var myDocuments = Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments);
-            var executeInfo = Path.Combine(myDocuments, "Starcraft II", "ExecuteInfo.txt");
-            if (File.Exists(executeInfo))
+            var sc2Path = Environment.GetEnvironmentVariable("SC2PATH");
+            if (sc2Path == null)
             {
-                var lines = File.ReadAllLines(executeInfo);
-                foreach (string line in lines)
+                var myDocuments = Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments);
+                var executeInfo = Path.Combine(myDocuments, "Starcraft II", "ExecuteInfo.txt");
+                
+                if (File.Exists(executeInfo))
                 {
-                    var argument = line.Substring(line.IndexOf('=') + 1).Trim();
-                    if (line.Trim().StartsWith("executable"))
+                    var lines = File.ReadAllLines(executeInfo);
+                    foreach (string line in lines)
                     {
-                        starcraftExe = argument;
-                        starcraftDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(starcraftExe)));
+                        var argument = line.Substring(line.IndexOf('=') + 1).Trim();
+                        if (line.Trim().StartsWith("executable"))
+                        {
+                            starcraftExe = argument;
+                            starcraftDir =
+                                Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(starcraftExe)));
+                        }
                     }
+                }
+                else
+                {
+                    throw new Exception("Unable to find ExecuteInfo.txt at " + executeInfo);
                 }
             }
             else
             {
-                throw new Exception("Unable to find ExecuteInfo.txt at " + executeInfo);
+                if (Directory.Exists(sc2Path))
+                {
+                    starcraftDir = sc2Path;
+                    starcraftExe = Path.Combine(starcraftDir, "Versions/Base88500/SC2_x64.exe");
+                }
+                else
+                {
+                    throw new Exception("Given SC2PATH env var does not exist: " + sc2Path);
+                }
             }
         }
         
@@ -306,7 +335,7 @@ namespace Sharky
         
         public async Task RunSinglePlayer(ISharkyBot bot, string map, Race myRace, Race opponentRace, Difficulty opponentDifficulty, AIBuild aIBuild, int randomSeed = -1, string opponentID = "test", bool realTime = false)
         {
-            readSettings();
+            ReadSettings();
             StartSC2Instance(5678);
             await Connect(5678);
             await CreateGame(map, opponentRace, opponentDifficulty, aIBuild, randomSeed, realTime);
